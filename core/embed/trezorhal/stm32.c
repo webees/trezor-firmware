@@ -19,6 +19,7 @@
 
 #include STM32_HAL_H
 
+#include "rdi.h"
 #include "rng.h"
 
 const uint8_t AHBPrescTable[16] = {0, 0, 0, 0, 0, 0, 0, 0,
@@ -92,6 +93,7 @@ void SysTick_Handler(void) {
   // this is a millisecond tick counter that wraps after approximately
   // 49.71 days = (0xffffffff / (24 * 60 * 60 * 1000))
   uwTick++;
+  rdi_handler();
 }
 
 // from util.s
