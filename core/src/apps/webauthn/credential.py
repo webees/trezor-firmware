@@ -4,12 +4,14 @@ from ubinascii import hexlify
 
 import storage.device
 from trezor import log, utils
-from trezor.crypto import bip32, chacha20poly1305, hashlib, hmac, random
+from trezor.crypto import bip32, chacha20poly1305, der, hashlib, hmac, random
+from trezor.crypto.curve import ed25519, nist256p1
 
 from apps.common import HARDENED, cbor, seed
+from apps.webauthn import common
 
 if False:
-    from typing import Optional
+    from typing import Iterable, Optional
 
 # Credential ID values
 _CRED_ID_VERSION = b"\xf1\xd0\x02\x00"
@@ -17,14 +19,23 @@ _CRED_ID_MIN_LENGTH = const(33)
 _KEY_HANDLE_LENGTH = const(64)
 
 # Credential ID keys
-_CRED_ID_RP_ID = const(0x01)
-_CRED_ID_RP_NAME = const(0x02)
-_CRED_ID_USER_ID = const(0x03)
-_CRED_ID_USER_NAME = const(0x04)
-_CRED_ID_USER_DISPLAY_NAME = const(0x05)
-_CRED_ID_CREATION_TIME = const(0x06)
-_CRED_ID_HMAC_SECRET = const(0x07)
-_CRED_ID_USE_SIGN_COUNT = const(0x08)
+_CRED_ID_RP_ID = const(1)
+_CRED_ID_RP_NAME = const(2)
+_CRED_ID_USER_ID = const(3)
+_CRED_ID_USER_NAME = const(4)
+_CRED_ID_USER_DISPLAY_NAME = const(5)
+_CRED_ID_CREATION_TIME = const(6)
+_CRED_ID_HMAC_SECRET = const(7)
+_CRED_ID_USE_SIGN_COUNT = const(8)
+_CRED_ID_ALGORITHM = const(9)
+_CRED_ID_CURVE = const(10)
+
+# Defaults
+_DEFAULT_ALGORITHM = common.COSE_ALG_ES256
+_DEFAULT_CURVE = common.COSE_CURVE_P256
+
+# Curves
+CURVE_NAME = {common.COSE_CURVE_ED25519: "ed25519", common.COSE_CURVE_P256: "nist256p1"}
 
 # Key paths
 _U2F_KEY_PATH = const(0x80553246)
@@ -44,7 +55,10 @@ class Credential:
     def account_name(self) -> Optional[str]:
         return None
 
-    def private_key(self) -> bytes:
+    def public_key(self) -> bytes:
+        return b""
+
+    def sign(self, data: Iterable[bytes]) -> bytes:
         return b""
 
     def hmac_secret_key(self) -> Optional[bytes]:
@@ -71,6 +85,8 @@ class Fido2Credential(Credential):
         self.creation_time = 0  # type: int
         self.hmac_secret = False  # type: bool
         self.use_sign_count = False  # type: bool
+        self.algorithm = _DEFAULT_ALGORITHM  # type: int
+        self.curve = _DEFAULT_CURVE  # type: int
 
     def __lt__(self, other: Credential) -> bool:
         # Sort FIDO2 credentials newest first amongst each other.
@@ -95,6 +111,8 @@ class Fido2Credential(Credential):
                     (_CRED_ID_CREATION_TIME, self.creation_time),
                     (_CRED_ID_HMAC_SECRET, self.hmac_secret),
                     (_CRED_ID_USE_SIGN_COUNT, self.use_sign_count),
+                    (_CRED_ID_ALGORITHM, self.algorithm),
+                    (_CRED_ID_CURVE, self.curve),
                 )
                 if value
             }
@@ -156,6 +174,8 @@ class Fido2Credential(Credential):
         cred.creation_time = data.get(_CRED_ID_CREATION_TIME, 0)
         cred.hmac_secret = data.get(_CRED_ID_HMAC_SECRET, False)
         cred.use_sign_count = data.get(_CRED_ID_USE_SIGN_COUNT, False)
+        cred.algorithm = data.get(_CRED_ID_ALGORITHM, _DEFAULT_ALGORITHM)
+        cred.curve = data.get(_CRED_ID_CURVE, _DEFAULT_CURVE)
         cred.id = cred_id
 
         if (
@@ -184,6 +204,8 @@ class Fido2Credential(Credential):
             and isinstance(self.hmac_secret, bool)
             and isinstance(self.use_sign_count, bool)
             and isinstance(self.creation_time, (int, type(None)))
+            and isinstance(self.algorithm, (int, type(None)))
+            and isinstance(self.curve, (int, type(None)))
             and isinstance(self.id, (bytes, bytearray))
         )
 
@@ -204,8 +226,49 @@ class Fido2Credential(Credential):
         path = [HARDENED | 10022, HARDENED | int.from_bytes(self.id[:4], "big")] + [
             HARDENED | i for i in ustruct.unpack(">4L", self.id[-16:])
         ]
-        node = seed.derive_node_without_passphrase(path, "nist256p1")
+        node = seed.derive_node_without_passphrase(path, CURVE_NAME[self.curve])
         return node.private_key()
+
+    def public_key(self) -> bytes:
+        if self.curve == common.COSE_CURVE_P256:
+            pubkey = nist256p1.publickey(self.private_key(), False)
+            return cbor.encode(
+                {
+                    common.COSE_ALG_KEY: self.algorithm,
+                    common.COSE_KEY_TYPE_KEY: common.COSE_KEY_TYPE_EC2,
+                    common.COSE_CURVE_KEY: self.curve,
+                    common.COSE_X_COORD_KEY: pubkey[1:33],
+                    common.COSE_Y_COORD_KEY: pubkey[33:],
+                }
+            )
+        elif self.curve == common.COSE_CURVE_ED25519:
+            pubkey = ed25519.publickey_x(self.private_key())
+            return cbor.encode(
+                {
+                    common.COSE_ALG_KEY: self.algorithm,
+                    common.COSE_KEY_TYPE_KEY: common.COSE_KEY_TYPE_OKP,
+                    common.COSE_CURVE_KEY: self.curve,
+                    common.COSE_X_COORD_KEY: pubkey,
+                }
+            )
+        raise TypeError
+
+    def sign(self, data: Iterable[bytes]) -> bytes:
+        if (self.algorithm, self.curve) == (
+            common.COSE_ALG_ES256,
+            common.COSE_CURVE_P256,
+        ):
+            dig = hashlib.sha256()
+            for segment in data:
+                dig.update(segment)
+            sig = nist256p1.sign(self.private_key(), dig.digest(), False)
+            return der.encode_seq((sig[1:33], sig[33:]))
+        elif (self.algorithm, self.curve) == (
+            common.COSE_ALG_EDDSA,
+            common.COSE_CURVE_ED25519,
+        ):
+            return ed25519.sign(self.private_key(), b"".join(bytes(segment) for segment in data))
+        raise TypeError
 
     def hmac_secret_key(self) -> Optional[bytes]:
         # Returns the symmetric key for the hmac-secret extension also known as CredRandom.
@@ -242,6 +305,16 @@ class U2fCredential(Credential):
         if self.node is None:
             return b""
         return self.node.private_key()
+
+    def public_key(self) -> bytes:
+        return nist256p1.publickey(self.private_key(), False)
+
+    def sign(self, data: Iterable[bytes]) -> bytes:
+        dig = hashlib.sha256()
+        for segment in data:
+            dig.update(segment)
+        sig = nist256p1.sign(self.private_key(), dig.digest(), False)
+        return der.encode_seq((sig[1:33], sig[33:]))
 
     def generate_key_handle(self) -> None:
         # derivation path is m/U2F'/r'/r'/r'/r'/r'/r'/r'/r'

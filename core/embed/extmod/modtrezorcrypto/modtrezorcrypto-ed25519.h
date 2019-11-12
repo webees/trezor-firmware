@@ -60,6 +60,24 @@ STATIC mp_obj_t mod_trezorcrypto_ed25519_publickey(mp_obj_t secret_key) {
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(mod_trezorcrypto_ed25519_publickey_obj,
                                  mod_trezorcrypto_ed25519_publickey);
 
+/// def publickey_x(secret_key: bytes) -> bytes:
+///     """
+///     Computes public key from secret key.
+///     """
+STATIC mp_obj_t mod_trezorcrypto_ed25519_publickey_x(mp_obj_t secret_key) {
+  mp_buffer_info_t sk;
+  mp_get_buffer_raise(secret_key, &sk, MP_BUFFER_READ);
+  if (sk.len != 32) {
+    mp_raise_ValueError("Invalid length of secret key");
+  }
+  uint8_t out[32];
+  ed25519_publickey_x(*(const ed25519_secret_key *)sk.buf,
+                      *(ed25519_public_key *)out);
+  return mp_obj_new_bytes(out, sizeof(out));
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(mod_trezorcrypto_ed25519_publickey_x_obj,
+                                 mod_trezorcrypto_ed25519_publickey_x);
+
 /// def sign(secret_key: bytes, message: bytes, hasher: str = "") -> bytes:
 ///     """
 ///     Uses secret key to produce the signature of message.
@@ -285,6 +303,8 @@ STATIC const mp_rom_map_elem_t mod_trezorcrypto_ed25519_globals_table[] = {
      MP_ROM_PTR(&mod_trezorcrypto_ed25519_generate_secret_obj)},
     {MP_ROM_QSTR(MP_QSTR_publickey),
      MP_ROM_PTR(&mod_trezorcrypto_ed25519_publickey_obj)},
+    {MP_ROM_QSTR(MP_QSTR_publickey_x),
+     MP_ROM_PTR(&mod_trezorcrypto_ed25519_publickey_x_obj)},
     {MP_ROM_QSTR(MP_QSTR_sign), MP_ROM_PTR(&mod_trezorcrypto_ed25519_sign_obj)},
 #if !BITCOIN_ONLY
     {MP_ROM_QSTR(MP_QSTR_sign_ext),

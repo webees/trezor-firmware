@@ -13,6 +13,7 @@ from trezor.ui.popup import Popup
 from trezor.ui.text import Text
 
 from apps.common import cbor
+from apps.webauthn import common
 from apps.webauthn.confirm import ConfirmContent, ConfirmInfo
 from apps.webauthn.credential import Credential, Fido2Credential, U2fCredential
 from apps.webauthn.resident_credentials import (
@@ -120,17 +121,6 @@ _U2F_CONFIRM_TIMEOUT_MS = const(10 * 1000)
 _FIDO2_CONFIRM_TIMEOUT_MS = const(60 * 1000)
 _POPUP_TIMEOUT_MS = const(4 * 1000) if not __debug__ else const(0)
 
-# CBOR object signing and encryption algorithms and keys
-_COSE_ALG_KEY = const(3)
-_COSE_ALG_ES256 = const(-7)  # ECDSA P-256 with SHA-256
-_COSE_ALG_ECDH_ES_HKDF_256 = const(-25)  # Ephemeral-static ECDH with HKDF SHA-256
-_COSE_KEY_TYPE_KEY = const(1)
-_COSE_KEY_TYPE_EC2 = const(2)  # elliptic curve keys with x- and y-coordinate pair
-_COSE_CURVE_KEY = const(-1)  # elliptic curve identifier
-_COSE_CURVE_P256 = const(1)  # P-256 curve
-_COSE_X_COORD_KEY = const(-2)  # x coordinate of the public key
-_COSE_Y_COORD_KEY = const(-3)  # y coordinate of the public key
-
 # hid error codes
 _ERR_NONE = const(0x00)  # no error
 _ERR_INVALID_CMD = const(0x01)  # invalid command
@@ -176,10 +166,7 @@ _U2F_REGISTER_ID = const(0x05)  # version 2 registration identifier
 _U2F_ATT_PRIV_KEY = b"q&\xac+\xf6D\xdca\x86\xad\x83\xef\x1f\xcd\xf1*W\xb5\xcf\xa2\x00\x0b\x8a\xd0'\xe9V\xe8T\xc5\n\x8b"
 _U2F_ATT_CERT = b"0\x82\x01\x180\x81\xc0\x02\t\x00\xb1\xd9\x8fBdr\xd3,0\n\x06\x08*\x86H\xce=\x04\x03\x020\x151\x130\x11\x06\x03U\x04\x03\x0c\nTrezor U2F0\x1e\x17\r160429133153Z\x17\r260427133153Z0\x151\x130\x11\x06\x03U\x04\x03\x0c\nTrezor U2F0Y0\x13\x06\x07*\x86H\xce=\x02\x01\x06\x08*\x86H\xce=\x03\x01\x07\x03B\x00\x04\xd9\x18\xbd\xfa\x8aT\xac\x92\xe9\r\xa9\x1f\xcaz\xa2dT\xc0\xd1s61M\xde\x83\xa5K\x86\xb5\xdfN\xf0Re\x9a\x1do\xfc\xb7F\x7f\x1a\xcd\xdb\x8a3\x08\x0b^\xed\x91\x89\x13\xf4C\xa5&\x1b\xc7{h`o\xc10\n\x06\x08*\x86H\xce=\x04\x03\x02\x03G\x000D\x02 $\x1e\x81\xff\xd2\xe5\xe6\x156\x94\xc3U.\x8f\xeb\xd7\x1e\x895\x92\x1c\xb4\x83ACq\x1cv\xea\xee\xf3\x95\x02 _\x80\xeb\x10\xf2\\\xcc9\x8b<\xa8\xa9\xad\xa4\x02\x7f\x93\x13 w\xb7\xab\xcewFZ'\xf5=3\xa1\x1d"
 _BOGUS_APPID = b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-_AAGUID = (
-    b"\xd6\xd0\xbd\xc3b\xee\xc4\xdb\xde\x8dzenJD\x87"
-)  # First 16 bytes of SHA-256("TREZOR 2")
-_BOGUS_PRIV_KEY = b"\xAA" * 32
+_AAGUID = b"\xd6\xd0\xbd\xc3b\xee\xc4\xdb\xde\x8dzenJD\x87"  # First 16 bytes of SHA-256("TREZOR 2")
 
 # authentication control byte
 _AUTH_ENFORCE = const(0x03)  # enforce user presence and sign
@@ -1117,7 +1104,7 @@ def msg_register(req: Msg, dialog_mgr: DialogManager) -> Cmd:
 
 
 def msg_register_sign(challenge: bytes, cred: U2fCredential) -> bytes:
-    pubkey = nist256p1.publickey(cred.private_key(), False)
+    pubkey = cred.public_key()
 
     # hash the request data together with keyhandle and pubkey
     dig = hashlib.sha256()
@@ -1212,16 +1199,8 @@ def msg_authenticate_sign(
     ctr = cred.next_signature_counter()
     ctrbuf = ustruct.pack(">L", ctr)
 
-    # hash input data together with counter
-    dig = hashlib.sha256()
-    dig.update(rp_id_hash)  # uint8_t appId[32];
-    dig.update(flags)  # uint8_t flags;
-    dig.update(ctrbuf)  # uint8_t ctr[4];
-    dig.update(challenge)  # uint8_t chal[32];
-
-    # sign the digest and convert to der
-    sig = nist256p1.sign(cred.private_key(), dig.digest(), False)
-    sig = der.encode_seq((sig[1:33], sig[33:]))
+    # sign the input data together with counter
+    sig = cred.sign((rp_id_hash, flags, ctrbuf, challenge))
 
     # pack to a response
     buf, resp = make_struct(resp_cmd_authenticate(len(sig)))
@@ -1324,11 +1303,18 @@ def cbor_make_credential(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
                 return cmd_error(req.cid, _ERR_CHANNEL_BUSY)
             return None
 
-        # Check that the relying party supports ECDSA P-256 with SHA-256. We don't support any other algorithms.
+        # Check that the relying party supports ECDSA with SHA-256 or EdDSA. We don't support any other algorithms.
         pub_key_cred_params = param[_MAKECRED_CMD_PUB_KEY_CRED_PARAMS]
-        if _COSE_ALG_ES256 not in algorithms_from_pub_key_cred_params(
-            pub_key_cred_params
-        ):
+        for alg in algorithms_from_pub_key_cred_params(pub_key_cred_params):
+            if False:  # alg == common.COSE_ALG_ES256:
+                cred.algorithm = alg
+                cred.curve = common.COSE_CURVE_P256
+                break
+            elif alg == common.COSE_ALG_EDDSA:
+                cred.algorithm = alg
+                cred.curve = common.COSE_CURVE_ED25519
+                break
+        else:
             return cbor_error(req.cid, _ERR_UNSUPPORTED_ALGORITHM)
 
         # Get options.
@@ -1402,26 +1388,13 @@ def cbor_make_credential(req: Cmd, dialog_mgr: DialogManager) -> Optional[Cmd]:
 def cbor_make_credential_sign(
     client_data_hash: bytes, cred: Fido2Credential, user_verification: bool
 ) -> bytes:
-    privkey = cred.private_key()
-    pubkey = nist256p1.publickey(privkey, False)
-
     flags = _AUTH_FLAG_UP | _AUTH_FLAG_AT
     if user_verification:
         flags |= _AUTH_FLAG_UV
 
     # Encode the authenticator data (Credential ID, its public key and extensions).
-    credential_pub_key = cbor.encode(
-        {
-            _COSE_ALG_KEY: _COSE_ALG_ES256,
-            _COSE_KEY_TYPE_KEY: _COSE_KEY_TYPE_EC2,
-            _COSE_CURVE_KEY: _COSE_CURVE_P256,
-            _COSE_X_COORD_KEY: pubkey[1:33],
-            _COSE_Y_COORD_KEY: pubkey[33:],
-        }
-    )
-
     att_cred_data = (
-        _AAGUID + len(cred.id).to_bytes(2, "big") + cred.id + credential_pub_key
+        _AAGUID + len(cred.id).to_bytes(2, "big") + cred.id + cred.public_key()
     )
 
     extensions = b""
@@ -1441,19 +1414,21 @@ def cbor_make_credential_sign(
 
     # Compute the attestation signature of the authenticator data.
     if _USE_BASIC_ATTESTATION:
-        privkey = _U2F_ATT_PRIV_KEY
-
-    dig = hashlib.sha256()
-    dig.update(authenticator_data)
-    dig.update(client_data_hash)
-    sig = nist256p1.sign(privkey, dig.digest(), False)
-    sig = der.encode_seq((sig[1:33], sig[33:]))
+        dig = hashlib.sha256()
+        dig.update(authenticator_data)
+        dig.update(client_data_hash)
+        sig = nist256p1.sign(_U2F_ATT_PRIV_KEY, dig.digest(), False)
+        sig = der.encode_seq((sig[1:33], sig[33:]))
+        attestation_statement = {
+            "alg": common.COSE_ALG_ES256,
+            "sig": sig,
+            "x5c": [_U2F_ATT_CERT],
+        }
+    else:
+        sig = cred.sign((authenticator_data, client_data_hash))
+        attestation_statement = {"alg": cred.algorithm, "sig": sig}
 
     # Encode the authenticatorMakeCredential response data.
-    attestation_statement = {"alg": _COSE_ALG_ES256, "sig": sig}
-    if _USE_BASIC_ATTESTATION:
-        attestation_statement["x5c"] = [_U2F_ATT_CERT]
-
     return cbor.encode(
         {
             _MAKECRED_RESP_FMT: "packed",
@@ -1581,16 +1556,16 @@ def cbor_get_assertion_hmac_secret(
     cred: Credential, hmac_secret: dict
 ) -> Optional[bytes]:
     key_agreement = hmac_secret[1]  # The public key of platform key agreement key.
-    # NOTE: We should check the key_agreement[_COSE_ALG_KEY] here, but to avoid compatibility issues we don't,
+    # NOTE: We should check the key_agreement[COSE_ALG_KEY] here, but to avoid compatibility issues we don't,
     # because there is currently no valid value which describes the actual key agreement algorithm.
     if (
-        key_agreement[_COSE_KEY_TYPE_KEY] != _COSE_KEY_TYPE_EC2
-        or key_agreement[_COSE_CURVE_KEY] != _COSE_CURVE_P256
+        key_agreement[common.COSE_KEY_TYPE_KEY] != common.COSE_KEY_TYPE_EC2
+        or key_agreement[common.COSE_CURVE_KEY] != common.COSE_CURVE_P256
     ):
         return None
 
-    x = key_agreement[_COSE_X_COORD_KEY]
-    y = key_agreement[_COSE_Y_COORD_KEY]
+    x = key_agreement[common.COSE_X_COORD_KEY]
+    y = key_agreement[common.COSE_Y_COORD_KEY]
     salt_enc = hmac_secret[2]  # The encrypted salt.
     salt_auth = hmac_secret[3]  # The HMAC of the encrypted salt.
     if (
@@ -1663,16 +1638,10 @@ def cbor_get_assertion_sign(
     )
 
     # Sign the authenticator data and the client data hash.
-    dig = hashlib.sha256()
-    dig.update(authenticator_data)
-    dig.update(client_data_hash)
-    if user_presence:
-        privkey = cred.private_key()
-    else:
-        # Spec deviation: Use a bogus key during silent authentication.
-        privkey = _BOGUS_PRIV_KEY
-    sig = nist256p1.sign(privkey, dig.digest(), False)
-    sig = der.encode_seq((sig[1:33], sig[33:]))
+    sig = cred.sign((authenticator_data, client_data_hash))
+    if not user_presence:
+        # Spec deviation: Use a bogus signature during silent authentication.
+        sig = len(sig) * b"\xAA"
 
     # Encode the authenticatorGetAssertion response data.
     response = {
@@ -1718,16 +1687,16 @@ def cbor_client_pin(req: Cmd) -> Cmd:
         return cbor_error(req.cid, _ERR_UNSUPPORTED_OPTION)
 
     # Encode the public key of the authenticator key agreement key.
-    # NOTE: There is currently no valid value for _COSE_ALG_KEY which describes the actual
-    # key agreement algorithm as specified, but _COSE_ALG_ECDH_ES_HKDF_256 is allegedly
+    # NOTE: There is currently no valid value for COSE_ALG_KEY which describes the actual
+    # key agreement algorithm as specified, but COSE_ALG_ECDH_ES_HKDF_256 is allegedly
     # recommended by the latest draft of the CTAP2 spec.
     response_data = {
         _CLIENTPIN_RESP_KEY_AGREEMENT: {
-            _COSE_ALG_KEY: _COSE_ALG_ECDH_ES_HKDF_256,
-            _COSE_KEY_TYPE_KEY: _COSE_KEY_TYPE_EC2,
-            _COSE_CURVE_KEY: _COSE_CURVE_P256,
-            _COSE_X_COORD_KEY: _KEY_AGREEMENT_PUBKEY[1:33],
-            _COSE_Y_COORD_KEY: _KEY_AGREEMENT_PUBKEY[33:],
+            common.COSE_ALG_KEY: common.COSE_ALG_ECDH_ES_HKDF_256,
+            common.COSE_KEY_TYPE_KEY: common.COSE_KEY_TYPE_EC2,
+            common.COSE_CURVE_KEY: common.COSE_CURVE_P256,
+            common.COSE_X_COORD_KEY: _KEY_AGREEMENT_PUBKEY[1:33],
+            common.COSE_Y_COORD_KEY: _KEY_AGREEMENT_PUBKEY[33:],
         }
     }
 

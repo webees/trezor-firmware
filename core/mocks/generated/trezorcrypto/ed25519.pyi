@@ -16,6 +16,13 @@ def publickey(secret_key: bytes) -> bytes:
 
 
 # extmod/modtrezorcrypto/modtrezorcrypto-ed25519.h
+def publickey_x(secret_key: bytes) -> bytes:
+    """
+    Computes public key from secret key.
+    """
+
+
+# extmod/modtrezorcrypto/modtrezorcrypto-ed25519.h
 def sign(secret_key: bytes, message: bytes, hasher: str = "") -> bytes:
     """
     Uses secret key to produce the signature of message.
