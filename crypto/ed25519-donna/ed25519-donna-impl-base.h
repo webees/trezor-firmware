@@ -45,6 +45,8 @@ void ge25519_pnielsadd(ge25519_pniels *r, const ge25519 *p, const ge25519_pniels
 
 void ge25519_pack(unsigned char r[32], const ge25519 *p);
 
+void ge25519_pack_x(unsigned char r[32], const ge25519 *p);
+
 int ge25519_unpack_negative_vartime(ge25519 *r, const unsigned char p[32]);
 
 /*

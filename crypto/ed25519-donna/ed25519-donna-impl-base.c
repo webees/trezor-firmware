@@ -191,6 +191,13 @@ void ge25519_pack(unsigned char r[32], const ge25519 *p) {
 	r[31] ^= ((parity[0] & 1) << 7);
 }
 
+void ge25519_pack_x(unsigned char r[32], const ge25519 *p) {
+  bignum25519 tx = {0}, zi = {0};
+  curve25519_recip(zi, p->z);
+  curve25519_mul(tx, p->x, zi);
+  curve25519_contract(r, tx);
+}
+
 int ge25519_unpack_negative_vartime(ge25519 *r, const unsigned char p[32]) {
 	const unsigned char zero[32] = {0};
 	const bignum25519 one = {1};
