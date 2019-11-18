@@ -33,6 +33,7 @@ static uint8_t buffer[BUFFER_LENGTH];
 static uint8_t buffer_index;
 static uint32_t bytes_since_reseed;
 static bool initialized = false;
+static uint8_t session_delay;
 
 static void rdi_reseed(void) {
   uint8_t entropy[48];
@@ -63,19 +64,22 @@ static uint32_t random8(void) {
   return buffer[buffer_index];
 }
 
+void rdi_regenerate_session_delay(void) { session_delay = random8(); }
+
 void rdi_start(void) {
   rdi_reseed();
   bytes_since_reseed = 0;
   buffer_refill();
   buffer_index = 0;
   initialized = true;
+  rdi_regenerate_session_delay();
 }
 
 void rdi_stop(void) { initialized = false; }
 
 void rdi_handler(void) {
   if (initialized) {
-    uint32_t delay = random8();
+    uint32_t delay = random8() + session_delay;
 
     asm volatile(
         "ldr r0, %0;"  // r0 = delay

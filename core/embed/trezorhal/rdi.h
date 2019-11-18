@@ -20,3 +20,4 @@
 void rdi_handler(void);
 void rdi_start(void);
 void rdi_stop(void);
+void rdi_regenerate_session_delay(void);
