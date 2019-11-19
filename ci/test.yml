@@ -272,66 +272,66 @@ crypto test:
 
 
 # Legacy
-
-legacy emu test:
-  stage: test
-  <<: *only_changes_legacy
-  dependencies:
-    - legacy emu regular build
-  variables:
-    EMULATOR: "1"
-  script:
-    - cd legacy
-    - pipenv run script/test
-  artifacts:
-    name: legacy-emu-test
-    paths:
-      - tests/junit.xml
-    reports:
-      junit: tests/junit.xml
-    expire_in: 1 week
-    when: always
-
-legacy emu btconly test:
-  stage: test
-  <<: *only_changes_legacy
-  dependencies:
-    - legacy emu btconly build
-  variables:
-    EMULATOR: "1"
-    EMULATOR_BINARY: "firmware/trezor-bitcoinonly.elf"
-    TREZOR_PYTEST_SKIP_ALTCOINS: 1
-  script:
-    - cd legacy
-    - pipenv run script/test
-  artifacts:
-    name: legacy-emu-btconly-test
-    paths:
-      - tests/junit.xml
-    reports:
-      junit: tests/junit.xml
-    expire_in: 1 week
-    when: always
-
-
-legacy emu upgrade test:
-  stage: test
-  <<: *only_changes_legacy
-  dependencies:
-    - legacy emu regular build
-  variables:
-    TREZOR_UPGRADE_TEST: "legacy"
-  script:
-    - tests/download_emulators.sh
-    - pipenv run pytest --junitxml=tests/junit.xml tests/upgrade_tests
-  artifacts:
-    name: legacy-emu-upgrade-test
-    paths:
-      - tests/junit.xml
-    reports:
-      junit: tests/junit.xml
-    expire_in: 1 week
-    when: always
+#
+#legacy emu test:
+#  stage: test
+#  <<: *only_changes_legacy
+#  dependencies:
+#    - legacy emu regular build
+#  variables:
+#    EMULATOR: "1"
+#  script:
+#    - cd legacy
+#    - pipenv run script/test
+#  artifacts:
+#    name: legacy-emu-test
+#    paths:
+#      - tests/junit.xml
+#    reports:
+#      junit: tests/junit.xml
+#    expire_in: 1 week
+#    when: always
+#
+#legacy emu btconly test:
+#  stage: test
+#  <<: *only_changes_legacy
+#  dependencies:
+#    - legacy emu btconly build
+#  variables:
+#    EMULATOR: "1"
+#    EMULATOR_BINARY: "firmware/trezor-bitcoinonly.elf"
+#    TREZOR_PYTEST_SKIP_ALTCOINS: 1
+#  script:
+#    - cd legacy
+#    - pipenv run script/test
+#  artifacts:
+#    name: legacy-emu-btconly-test
+#    paths:
+#      - tests/junit.xml
+#    reports:
+#      junit: tests/junit.xml
+#    expire_in: 1 week
+#    when: always
+#
+#
+#legacy emu upgrade test:
+#  stage: test
+#  <<: *only_changes_legacy
+#  dependencies:
+#    - legacy emu regular build
+#  variables:
+#    TREZOR_UPGRADE_TEST: "legacy"
+#  script:
+#    - tests/download_emulators.sh
+#    - pipenv run pytest --junitxml=tests/junit.xml tests/upgrade_tests
+#  artifacts:
+#    name: legacy-emu-upgrade-test
+#    paths:
+#      - tests/junit.xml
+#    reports:
+#      junit: tests/junit.xml
+#    expire_in: 1 week
+#    when: always
 
 
 # Python
