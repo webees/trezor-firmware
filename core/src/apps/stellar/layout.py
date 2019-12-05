@@ -29,13 +29,13 @@ async def require_confirm_timebounds(ctx, start: int, end: int):
     text = Text("Confirm timebounds", ui.ICON_SEND, ui.GREEN)
     text.bold("Valid from (UTC):")
     if start:
-        text.normal(str(start))
+        text.normal(utils.format_timestamp(start))
     else:
         text.mono("[no restriction]")
 
     text.bold("Valid to (UTC):")
     if end:
-        text.normal(str(end))
+        text.normal(utils.format_timestamp(end))
     else:
         text.mono("[no restriction]")
 

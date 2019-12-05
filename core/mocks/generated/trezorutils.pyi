@@ -30,6 +30,13 @@ def halt(msg: str = None) -> None:
 
 
 # extmod/modtrezorutils/modtrezorutils.c
+def format_timestamp(timestamp: int) -> str:
+    """
+    Returns date formatted as YYYY-MM-DD HH:MM:SS in UTC.
+    """
+
+
+# extmod/modtrezorutils/modtrezorutils.c
 def set_mode_unprivileged() -> None:
     """
     Set unprivileged mode.

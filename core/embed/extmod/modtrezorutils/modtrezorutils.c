@@ -26,6 +26,7 @@
 #include "embed/extmod/trezorobj.h"
 
 #include <string.h>
+#include <time.h>
 #include "common.h"
 
 /// def consteq(sec: bytes, pub: bytes) -> bool:
@@ -105,6 +106,22 @@ STATIC mp_obj_t mod_trezorutils_halt(size_t n_args, const mp_obj_t *args) {
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_trezorutils_halt_obj, 0, 1,
                                            mod_trezorutils_halt);
 
+/// def format_timestamp(timestamp: int) -> str:
+///     """
+///     Returns date formatted as YYYY-MM-DD HH:MM:SS in UTC.
+///     """
+STATIC mp_obj_t mod_trezorutils_format_timestamp(mp_obj_t _timestamp) {
+  time_t time;
+  time = trezor_obj_get_uint(_timestamp);
+  const struct tm *tm;
+  tm = gmtime(&time);
+  char time_str[32];
+  strftime(time_str, sizeof(time_str), "%F %T", tm);
+  return mp_obj_new_str(time_str, strlen(time_str));
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(mod_trezorutils_format_timestamp_obj,
+                                           mod_trezorutils_format_timestamp);
+
 /// def set_mode_unprivileged() -> None:
 ///     """
 ///     Set unprivileged mode.
@@ -134,6 +151,7 @@ STATIC const mp_rom_map_elem_t mp_module_trezorutils_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_consteq), MP_ROM_PTR(&mod_trezorutils_consteq_obj)},
     {MP_ROM_QSTR(MP_QSTR_memcpy), MP_ROM_PTR(&mod_trezorutils_memcpy_obj)},
     {MP_ROM_QSTR(MP_QSTR_halt), MP_ROM_PTR(&mod_trezorutils_halt_obj)},
+    {MP_ROM_QSTR(MP_QSTR_format_timestamp), MP_ROM_PTR(&mod_trezorutils_format_timestamp_obj)},
     {MP_ROM_QSTR(MP_QSTR_set_mode_unprivileged),
      MP_ROM_PTR(&mod_trezorutils_set_mode_unprivileged_obj)},
     // various built-in constants
