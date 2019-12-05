@@ -1,5 +1,6 @@
 import gc
 import sys
+import utime
 from trezorutils import (  # type: ignore[attr-defined] # noqa: F401
     BITCOIN_ONLY,
     EMULATOR,
@@ -93,6 +94,12 @@ def format_ordinal(number: int) -> str:
     return str(number) + {1: "st", 2: "nd", 3: "rd"}.get(
         4 if 10 <= number % 100 < 20 else number % 10, "th"
     )
+
+
+def format_timestamp(timestamp: int) -> str:
+    # localtime returns (year, month, day, hour, minute, second, weekday, yearday)
+    time = utime.localtime(timestamp)[:-3]
+    return "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(*time)
 
 
 if False:
