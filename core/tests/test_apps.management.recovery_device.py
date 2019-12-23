@@ -29,6 +29,8 @@ class TestSlip39(unittest.TestCase):
     @mock_storage
     def test_process_slip39_basic(self):
         storage.recovery.set_in_progress(True)
+        
+        assert False
 
         # first share (member index 5)
         first = MNEMONIC_SLIP39_BASIC_20_3of6[0]
