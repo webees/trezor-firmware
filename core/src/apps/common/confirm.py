@@ -28,6 +28,8 @@ async def confirm(
 ) -> bool:
     await ctx.call(ButtonRequest(code=code), ButtonAck)
 
+    # TODO
+
     if content.__class__.__name__ == "Paginated":
         # The following works because asserts are omitted in non-debug builds.
         # IOW if the assert runs, that means __debug__ is True and Paginated is imported

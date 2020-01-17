@@ -71,12 +71,15 @@ def test_extra_share_entered(client):
     debug = client.debug
 
     def input_flow():
+        import time
         yield  # Confirm Recovery
-        debug.press_yes()
+        # time.sleep(2)
+        debug.input(button=True, wait=True)
+        # debug.press_yes()
         # Proceed with recovery
-        yield from recovery_enter_shares(
-            debug, EXTRA_GROUP_SHARE + MNEMONIC_SLIP39_ADVANCED_20, groups=True
-        )
+        # yield from recovery_enter_shares(
+        #     debug, EXTRA_GROUP_SHARE + MNEMONIC_SLIP39_ADVANCED_20, groups=True
+        # )
 
     with client:
         client.set_input_flow(input_flow)
